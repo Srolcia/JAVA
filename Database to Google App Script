@@ -1,0 +1,211 @@
+
+
+function onOpen() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu('Metabase')
+  //.addItem('Import QuestionVIP', 'importQuestion')
+  .addItem('Import yesterday\'s supplement data', 'importDailyVIP')
+  .addToUi();
+}
+
+
+function importDailyVIP() {
+  importQuestionVIP(METABSE QUESTION, 'Security');
+}
+
+
+function importQuestionVIP(questionNumber, sheetName) {
+  // this is where we call Metabase
+  var status = getQuestionAsCSV(questionNumber, sheetName);
+ 
+  var log = {
+    'user': Session.getActiveUser().getEmail(),
+    'function': 'importQuestionVIP',
+    'questionNumber': questionNumber,
+    'status': status
+  };
+  if (log.status === true) {
+    console.log(log);
+  } else {
+    console.error(log);
+  }
+}
+
+// gets a login token and calls getQuestionAndFillSheet
+function getQuestionAsCSV(questionNumber, sheetName) {
+  var scriptProp = PropertiesService.getScriptProperties();
+  var baseUrl = "DATABASE URL";
+  var username = "EMAIL";
+  var password = "PASSWORD";
+  var token = "";
+  
+  //logs in and gets a token
+  if (!token) {
+    token = getToken(baseUrl, username, password);
+    scriptProp.setProperty('TOKEN', token);
+  }
+  
+  status = getQuestionAndFillSheet(baseUrl, token, questionNumber, sheetName);
+  return status;
+}
+
+// logs in Metabase, fetches data from the metabase question we choose, and populates the sheet we choose
+function getQuestionAndFillSheet(baseUrl, token, questionNumber, sheetName) {
+  var questionUrl = baseUrl + "api/card/" + questionNumber + "/query/csv";
+  var options = {
+    "method": "post",
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Metabase-Session": token
+    },
+    "muteHttpExceptions": true
+  };
+  
+  var response;
+  try {
+    response = UrlFetchApp.fetch(questionUrl, options);
+  } catch (e) {
+    return {
+      'success': false,
+      'error': e
+    };
+  }
+  var statusCode = response.getResponseCode();
+  
+  if (statusCode == 200 || statusCode == 202) {
+    var values = Utilities.parseCsv(response.getContentText());
+
+    console.log(values);
+
+    
+    // remove all table headers
+    values.shift();
+
+    // set data in right order
+    let formatedValues = formatValues(values);
+
+    try {
+      fillSheet(formatedValues, sheetName);
+      return {
+        'success': true
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e
+      };
+    }
+  } else if (statusCode == 401) {
+    var scriptProp = PropertiesService.getScriptProperties();
+    var username = scriptProp.getProperty('USERNAME');
+    var password = scriptProp.getProperty('PASSWORD');
+    
+    var token = getToken(baseUrl, username, password);
+    scriptProp.setProperty('TOKEN', token);
+    var e = "Error: Could not retrieve question. Metabase says: '" + response.getContentText() + "'. Please try again in a few minutes.";
+    return {
+      'success': false,
+      'error': e
+    };
+  } else {
+    var e = "Error: Could not retrieve question. Metabase says: '" + response.getContentText() + "'. Please try again later.";
+    return {
+      'success': false,
+      'error': e
+    };
+  }
+}
+
+// checks if IDs on auxiliary table on sheet 'SupplementQty' are correct and formats date
+function formatValues(values){
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Test');
+  // get all possible ids
+ // const idRangeValues = sheet.getRange("M5:M12").getValues().flat();
+  
+  // quick check to see if reference table has same template
+  //if (idRangeValues.length != 8 || idRangeValues[0] != '27370000001234097' || idRangeValues[5] != '27370000002996362' || idRangeValues[7] != '//27370000000057380') return;
+
+  // add date in new format
+  const splitImportDate = values[0][0].split("-");
+  const finalImportDate = splitImportDate[2] + "/" + splitImportDate[1] + "/" + splitImportDate[0];
+
+  let formatedValues = values.map(arr => {
+    arr.shift();
+    let newArr = [finalImportDate, ...arr]
+    return newArr;
+    
+  });
+
+  // this was used in a previous solution, not needed anymore 
+  // // make list with incoming ids
+  // const valueIds = values.map(val => val[1])
+
+  // for(let i = 0; i < idRangeValues.length; i++){
+    
+  //   var currentValue = idRangeValues[i];
+  //   var currentItemIndex = valueIds.indexOf(currentValue);
+
+  //   //see if current value (from list of all ids) exists in fetched data. If yes add, if not add a 0 in its place
+  //   if (currentItemIndex >= 0) { 
+  //     formatedValues[i + 1] = values[currentItemIndex][2];
+  //   } else { 
+  //     formatedValues[i + 1] = 0;
+  //   }
+  // }  
+  return formatedValues
+}
+
+##Rows exported + 1
+function fillSheet(formatedValues, sheetName) {
+  var colLetters = ["A", "B", "C", "D", "E", "F","G","H","I","J","K","L","M","N","O","P","Q"];
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  
+  var rows = formatedValues;
+
+  console.log('formated values -----> ', rows);
+
+
+  var minCol = colLetters[0];
+  var maxCol = colLetters[colLetters.length -2]; //column I is our last input column (J will be copy pasted automatically)
+  var minRow = sheet.getLastRow() + 1;
+  var maxRow = minRow + rows.length -1; // we will add only 1 line
+
+
+  console.log(colLetters.length )
+  console.log(minCol + minRow + ":" + maxCol + maxRow)
+  var range = sheet.getRange(minCol + minRow + ":" + maxCol + maxRow);
+
+  range.setValues(rows);
+
+  //copy the sum column from above's data
+  let maxCol2 = colLetters[colLetters.length -1];
+  var origin = sheet.getRange(maxCol2 + (minRow-1));
+  console.log(maxCol2 + minRow + ":" + maxCol2 + maxRow);
+  var destination = sheet.getRange(maxCol2 + minRow + ":" + maxCol2 + maxRow)
+  
+  origin.copyTo(destination, SpreadsheetApp.CopyPasteType.PASTE_NORMAL,false)
+}
+
+// Logs in and gets token
+function getToken(baseUrl, username, password) {
+  var sessionUrl = baseUrl + "api/session";
+  var options = {
+    "method": "post",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "payload": JSON.stringify({
+      username: username,
+      password: password
+    })
+  };
+  var response;
+  try {
+    response = UrlFetchApp.fetch(sessionUrl, options);
+  } catch (e) {
+    throw (e);
+  }
+  var token = JSON.parse(response).id;
+  return token;
+}
